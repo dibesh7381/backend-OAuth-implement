@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema({
   name: String,
   email: String,
   role : {type : String, default : "user"}
-}, { versionKey: false });
+}, { versionKey: false, collection : "OAuth Users" });
 const User = mongoose.model("User", userSchema);
 
 // ======= PASSPORT SETUP =======
