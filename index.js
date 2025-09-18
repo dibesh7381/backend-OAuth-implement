@@ -1,4 +1,4 @@
-import express from "express";
+jiimport express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -53,6 +53,11 @@ passport.use(new GoogleStrategy({
     }
   }
 ));
+
+// root test route
+app.get("/", (req, res) => {
+  res.send("OAuth backend working fine 🚀");
+});
 
 // ======= ROUTES =======
 
