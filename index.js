@@ -77,7 +77,7 @@ app.get("/auth/google/callback",
     });
 
     // Redirect frontend after login
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+    res.redirect(`${process.env.FRONTEND_URL}/profile`);
   }
 );
 
