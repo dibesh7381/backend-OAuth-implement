@@ -51,24 +51,31 @@ const Seller = mongoose.model("Seller", sellerSchema);
 
 
 // ====== PRODUCT MODEL ======
+// ====== PRODUCT MODEL ======
 const productSchema = new mongoose.Schema(
   {
     sellerId: { type: mongoose.Schema.Types.ObjectId, ref: "Seller", required: true },
     shopId: { type: mongoose.Schema.Types.ObjectId, ref: "Sellers", required: true },
-    shopName: String,
-    shopType: String,
-    brand: String,
-    model: String,
-    color: String,
-    storage: String,
-    ram: String,
-    price: Number,
-    image: String, // Cloudinary URL
+    shopName: { type: String, default: null },
+    shopType: { type: String, default: null },
+
+    // Common fields
+    brand: { type: String, default: null },
+    model: { type: String, default: null },
+    productType: { type: String, default: null }, // Home appliance category: TV, AC, Fridge, Cooler
+    color: { type: String, default: null },
+    price: { type: Number, default: null },
+    image: { type: String, default: null }, // Cloudinary URL
+
+    // Mobile-specific fields
+    storage: { type: String, default: null },
+    ram: { type: String, default: null },
   },
   { versionKey: false, collection: "AllProducts" }
 );
 
 const Product = mongoose.model("Product", productSchema);
+
 
 
 // ====== CLOUDINARY CONFIG ======
@@ -121,7 +128,7 @@ app.get("/auth/google",
 app.get("/auth/google/callback",
   passport.authenticate("google", { session: false }),
   (req, res) => {
-    const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, {
+    const token = jwt.sign({ id: req.user._id, role: req.user.role }, process.env.JWT_SECRET, {
       expiresIn: "1d"
     });
 
@@ -220,6 +227,10 @@ app.get("/seller/me", async (req, res) => {
 // ====== ADD PRODUCT ROUTE ======
 app.post("/product/add", upload.single("image"), async (req, res) => {
   try {
+    console.log("======== ADD PRODUCT REQUEST ========");
+    console.log("REQ.BODY:", req.body);
+    console.log("REQ.FILE:", req.file);
+
     const token = req.cookies.token;
     if (!token) return res.status(401).json({ message: "Unauthorized" });
 
@@ -233,16 +244,27 @@ app.post("/product/add", upload.single("image"), async (req, res) => {
     const seller = await Seller.findOne({ userId: user._id });
     if (!seller) return res.status(404).json({ message: "Seller not found" });
 
-    const { brand, model, color, storage, ram, price } = req.body;
+    // Safely destructure and provide defaults
+    const {
+      brand = null,
+      model = null,
+      productType = null,
+      color = null,
+      storage = null,
+      ram = null,
+      price = null
+    } = req.body;
+
     const image = req.file ? req.file.path : null;
 
     const newProduct = await Product.create({
-      sellerId: user._id,
+      sellerId: seller._id,
       shopId: seller._id,
       shopName: seller.shopName,
       shopType: seller.shopType,
       brand,
       model,
+      productType,
       color,
       storage,
       ram,
@@ -250,18 +272,34 @@ app.post("/product/add", upload.single("image"), async (req, res) => {
       image,
     });
 
+    console.log("NEW PRODUCT CREATED:", newProduct);
+
     res.json({ message: "Product added successfully", product: newProduct });
+
   } catch (err) {
-    console.error(err);
+    console.error("ERROR IN ADD PRODUCT:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
+
 // ====== GET ALL PRODUCTS ======
 app.get("/products", async (req, res) => {
   try {
+    const token = req.cookies.token; // cookie se token lena
+    let userRole = "customer"; // default
+
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        userRole = decoded.role || "customer"; // token me role ho to use karo
+      } catch (err) {
+        console.log("Invalid token");
+      }
+    }
+
     const products = await Product.find().sort({ _id: -1 }); // latest first
-    res.json({ products });
+    res.json({ products, userRole }); // client ko role bhi bhej do
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -283,7 +321,7 @@ app.get("/products/my", async (req, res) => {
     const seller = await Seller.findOne({ userId: user._id });
     if (!seller) return res.status(404).json({ message: "Seller not found" });
 
-    const products = await Product.find({ sellerId: user._id }).sort({ _id: -1 });
+    const products = await Product.find({ sellerId: seller._id }).sort({ _id: -1 });
     res.json({ products });
   } catch (err) {
     console.error(err);
@@ -304,29 +342,41 @@ app.put("/product/update/:id", upload.single("image"), async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
+    const seller = await Seller.findOne({ userId: user._id });
+    if (!seller) return res.status(404).json({ message: "Seller not found" });
+
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    // Check if the product belongs to the seller
-    if (!product.sellerId.equals(user._id)) {
+    // Check ownership using seller._id
+    if (!product.sellerId.equals(seller._id)) {
       return res.status(403).json({ message: "You cannot update this product" });
     }
 
-    const { brand, model, color, storage, ram, price } = req.body;
+    const {
+      brand = product.brand,
+      model = product.model,
+      productType = product.productType,
+      color = product.color,
+      storage = product.storage,
+      ram = product.ram,
+      price = product.price
+    } = req.body;
 
-    // Update product fields
-    if (brand) product.brand = brand;
-    if (model) product.model = model;
-    if (color) product.color = color;
-    if (storage) product.storage = storage;
-    if (ram) product.ram = ram;
-    if (price) product.price = price;
-    if (req.file) product.image = req.file.path; // Update image if uploaded
+    product.brand = brand;
+    product.model = model;
+    product.productType = productType;
+    product.color = color;
+    product.storage = storage;
+    product.ram = ram;
+    product.price = price;
+
+    if (req.file) product.image = req.file.path;
 
     await product.save();
     res.json({ message: "Product updated successfully", product });
   } catch (err) {
-    console.error(err);
+    console.error("UPDATE PRODUCT ERROR:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -344,21 +394,25 @@ app.delete("/product/delete/:id", async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
+    const seller = await Seller.findOne({ userId: user._id });
+    if (!seller) return res.status(404).json({ message: "Seller not found" });
+
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    // Only allow seller to delete own product
-    if (!product.sellerId.equals(user._id)) {
+    // Check ownership
+    if (!product.sellerId.equals(seller._id)) {
       return res.status(403).json({ message: "You cannot delete this product" });
     }
 
     await Product.findByIdAndDelete(req.params.id);
     res.json({ message: "Product deleted successfully" });
   } catch (err) {
-    console.error(err);
+    console.error("DELETE PRODUCT ERROR:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 
 
